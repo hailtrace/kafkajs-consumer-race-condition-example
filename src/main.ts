@@ -1,32 +1,48 @@
-/**
- * Some predefined delays (in milliseconds).
- */
-export enum Delays {
-  Short = 500,
-  Medium = 2000,
-  Long = 5000,
+import { Kafka } from 'kafkajs';
+
+const delay = (time: number) => new Promise((request) => setTimeout(request, time));
+
+async function main() {
+  const kafka = new Kafka({
+    clientId: 'kafkajs-consumer-race-condition-example',
+    brokers: [
+      'kafka1:19092'
+    ]
+  });
+
+  const admin = kafka.admin();
+  await admin.connect();
+
+  await admin.createTopics({
+    topics: [
+      {
+        topic: 'commands',
+        numPartitions: 32,
+      },
+    ],
+  });
+
+  await admin.disconnect();
+
+  const consumer = kafka.consumer({
+    groupId: 'test-consumer-group-id',
+  });
+  await consumer.connect();
+  await consumer.subscribe({ topic: 'commands', fromBeginning: true });
+  await consumer.run({
+    eachBatch: async (): Promise<void> => {
+      console.log('batch processed.');
+    },
+  });
+  const delayAmount = 10000 + (Math.random() * 10000);
+
+  console.log(`Delaying ${(delayAmount / 1000).toFixed(2)} before disconnect...`)
+  await delay(delayAmount);
+  await consumer.disconnect();
+  console.log('Disconnect.');
 }
 
-/**
- * Returns a Promise<string> that resolves after given time.
- *
- * @param {string} name - A name.
- * @param {number=} [delay=Delays.Medium] - Number of milliseconds to delay resolution of the Promise.
- * @returns {Promise<string>}
- */
-function delayedHello(
-  name: string,
-  delay: number = Delays.Medium,
-): Promise<string> {
-  return new Promise((resolve: (value?: string) => void) =>
-    setTimeout(() => resolve(`Hello, ${name}`), delay),
-  );
-}
-
-// Below are examples of using ESLint errors suppression
-// Here it is suppressing missing return type definitions for greeter function
-
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
-export async function greeter(name: string) {
-  return await delayedHello(name, Delays.Long);
-}
+main().catch((ex) => {
+  console.error(ex);
+  process.kill(1);
+});
